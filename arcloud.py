@@ -74,7 +74,8 @@ def getLatestForId (db, fileId):
 
   with contextlib.closing (db.cursor ()) as cur:
     cur.execute ("""
-      SELECT `id`, `entityType`, `fileName`, `filePath`, `parentFolderId`
+      SELECT `id`, `entityType`,
+             `fileId`, `fileName`, `filePath`, `parentFolderId`
         FROM `sync`
         WHERE `fileId` = ?
         ORDER BY `unixTime` DESC
@@ -157,6 +158,61 @@ def performLs (db, baseId):
     print (nm)
 
 
+def markContentsAs (db, baseId, value):
+  """
+  Marks a folder (and all its contents) as cloudOnly or
+  not cloudOnly (based on value).
+  """
+
+  idsToMark = []
+  idsToMark.append (getLatestForId (db, baseId)["id"])
+
+  content = getFolderContent (db, baseId)
+  for c in content:
+    if c["entityType"] == "file":
+      idsToMark.append (c["id"])
+    elif c["entityType"] == "folder":
+      markContentsAs (db, c["fileId"], value)
+
+  db.executemany ("""
+    UPDATE sync
+      SET cloudOnly = ?
+      WHERE id = ?
+  """, [(value, x) for x in idsToMark])
+
+
+def performCloud (db, baseId):
+  """
+  Marks a folder (and all its contents) as cloudOnly.
+  """
+
+  markContentsAs (db, baseId, 1)
+
+
+def performLocal (db, baseId):
+  """
+  Marks a folder and all its contents, as well as its direct
+  ancestors up to the drive root as not cloudOnly.
+  """
+
+  markContentsAs (db, baseId, 0)
+
+  idsToMark = []
+  parentId = getLatestForId (db, baseId)["parentFolderId"]
+  while True:
+    data = getLatestForId (db, parentId)
+    if data is None:
+      break
+    idsToMark.append (data["id"])
+    parentId = data["parentFolderId"]
+
+  db.executemany ("""
+    UPDATE sync
+      SET cloudOnly = 0
+      WHERE id = ?
+  """, [(x, ) for x in idsToMark])
+
+
 if __name__ == "__main__":
   args = parseArgs ()
   path = os.path.abspath (args.path)
@@ -170,5 +226,9 @@ if __name__ == "__main__":
     baseId = getIdForPath (db, path)
     if args.action == "ls":
       performLs (db, baseId)
+    elif args.action == "cloud":
+      performCloud (db, baseId)
+    elif args.action == "local":
+      performLocal (db, baseId)
     if args.action != "ls":
       db.commit ()

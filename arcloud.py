@@ -118,7 +118,7 @@ def getFolderContent (db, folderId):
 
   with contextlib.closing (db.cursor ()) as cur:
     cur.execute ("""
-      SELECT `fileId`
+      SELECT DISTINCT `fileId`
         FROM `sync`
         WHERE `parentFolderId` = ?
     """, (folderId,))
